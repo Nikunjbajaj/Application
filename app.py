@@ -1,6 +1,7 @@
 import streamlit as st
 import yfinance as yf
 import plotly.graph_objects as go
+import pandas as pd
 
 st.set_page_config(
     page_title="Stock Price Dashboard",
@@ -10,14 +11,15 @@ st.set_page_config(
 
 st.title("📈 Stock Price Dashboard")
 
-ticker = st.text_input(
-    "Enter Stock Symbol",
-    value="AAPL",
-    help="Examples: AAPL, MSFT, TSLA, RELIANCE.NS, TCS.NS"
-).upper()
+st.sidebar.header("Settings")
 
-period = st.selectbox(
-    "Select Time Period",
+ticker = st.sidebar.text_input(
+    "Stock Symbol",
+    value="AAPL"
+).upper().strip()
+
+period = st.sidebar.selectbox(
+    "Time Period",
     [
         "1mo",
         "3mo",
@@ -30,7 +32,7 @@ period = st.selectbox(
     ]
 )
 
-interval_map = {
+intervals = {
     "1mo": "1d",
     "3mo": "1d",
     "6mo": "1d",
@@ -41,63 +43,75 @@ interval_map = {
     "max": "1mo"
 }
 
-if st.button("Fetch Data"):
+interval = intervals[period]
 
-    with st.spinner("Downloading data..."):
+try:
 
-        data = yf.download(
-            ticker,
-            period=period,
-            interval=interval_map[period],
-            auto_adjust=True,
-            progress=False
-        )
+    data = yf.download(
+        tickers=ticker,
+        period=period,
+        interval=interval,
+        auto_adjust=True,
+        progress=False,
+        threads=False
+    )
 
     if data.empty:
-        st.error("No data found.")
-    else:
+        st.error("No data available.")
+        st.stop()
 
-        latest = float(data["Close"].iloc[-1])
-        highest = float(data["High"].max())
-        lowest = float(data["Low"].min())
+    # Handle MultiIndex columns if returned
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = data.columns.get_level_values(0)
 
-        c1, c2, c3 = st.columns(3)
+    data = data.dropna()
 
-        c1.metric("Latest Price", f"{latest:.2f}")
-        c2.metric("Highest", f"{highest:.2f}")
-        c3.metric("Lowest", f"{lowest:.2f}")
+    latest = float(data["Close"].iloc[-1])
+    high = float(data["High"].max())
+    low = float(data["Low"].min())
 
-        fig = go.Figure()
+    c1, c2, c3 = st.columns(3)
 
-        fig.add_trace(
-            go.Scatter(
-                x=data.index,
-                y=data["Close"],
-                mode="lines",
-                name="Close Price",
-                line=dict(width=3)
-            )
+    c1.metric("Latest Price", f"{latest:,.2f}")
+    c2.metric("Highest", f"{high:,.2f}")
+    c3.metric("Lowest", f"{low:,.2f}")
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Scatter(
+            x=data.index,
+            y=data["Close"],
+            mode="lines",
+            name="Close",
+            line=dict(width=2)
         )
+    )
 
-        fig.update_layout(
-            title=f"{ticker} Stock Price",
-            xaxis_title="Date",
-            yaxis_title="Price",
-            template="plotly_white",
-            height=650,
-            hovermode="x unified"
-        )
+    fig.update_layout(
+        template="plotly_white",
+        title=f"{ticker} Closing Price",
+        xaxis_title="Date",
+        yaxis_title="Price",
+        hovermode="x unified",
+        height=650
+    )
 
-        st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
 
-        st.subheader("Historical Data")
-        st.dataframe(data)
+    st.subheader("Historical Data")
 
-        csv = data.to_csv().encode()
+    st.dataframe(data, use_container_width=True)
 
-        st.download_button(
-            "Download CSV",
-            csv,
-            f"{ticker}_{period}.csv",
-            "text/csv"
-        )
+    csv = data.to_csv().encode("utf-8")
+
+    st.download_button(
+        label="Download CSV",
+        data=csv,
+        file_name=f"{ticker}_{period}.csv",
+        mime="text/csv"
+    )
+
+except Exception as e:
+    st.error("Unable to fetch stock data.")
+    st.exception(e)
